@@ -1,0 +1,126 @@
+============================================================
+ANÁLISIS ESTRUCTURAL DE ARCHIVO .GPX
+============================================================
+
+FORMATO: XML (texto estructurado)
+VERSIÓN ESTÁNDAR: 1.1
+NAMESPACE PRINCIPAL: http://www.topografix.com/GPX/1/1
+POSIBLES NAMESPACES ADICIONALES: GPXTPX (Garmin), GPEXT (Strava)
+
+------------------------------------------------------------
+1. ELEMENTO RAÍZ: <gpx>
+------------------------------------------------------------
+
+Atributos comunes:
+  - version="1.1"
+  - creator="Nombre del software (Garmin Connect, Strava, etc)"
+  - xmlns="http://www.topografix.com/GPX/1/1"
+  - xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  - xsi:schemaLocation="..." (URL del esquema XML)
+
+Estructura hija esperada:
+  ├── <metadata>
+  └── <trk>
+
+------------------------------------------------------------
+2. ELEMENTO: <metadata>
+------------------------------------------------------------
+
+Información básica del archivo:
+
+  ├── <link href="...">        ← Enlace al software fuente
+  │     └── <text>             ← Texto visible del enlace
+  └── <time>                   ← Fecha de creación del archivo (ISO 8601)
+
+------------------------------------------------------------
+3. ELEMENTO: <trk> (TRACK)
+------------------------------------------------------------
+
+Contenedor del recorrido registrado.
+
+Hijos esperados:
+  ├── <name>                   ← Nombre del track o actividad
+  └── <trkseg>                 ← Segmento del recorrido
+
+------------------------------------------------------------
+4. ELEMENTO: <trkseg> (TRACK SEGMENT)
+------------------------------------------------------------
+
+Un segmento es una colección de puntos GPS consecutivos.
+
+Hijos:
+  └── <trkpt lat="..." lon="..."> ← Punto de la traza GPS
+
+------------------------------------------------------------
+5. ELEMENTO: <trkpt> (TRACK POINT)
+------------------------------------------------------------
+
+Representa un punto GPS.
+
+Atributos:
+  - lat="..." ← Latitud (float)
+  - lon="..." ← Longitud (float)
+
+Hijos posibles:
+  ├── <ele>         ← Elevación en metros (float)
+  ├── <time>        ← Timestamp UTC en ISO 8601 (ej. 2024-05-17T10:23:44Z)
+  └── <extensions>  ← Información adicional del punto (HR, cadencia, etc)
+
+------------------------------------------------------------
+6. ELEMENTO: <extensions> (OPCIONAL)
+------------------------------------------------------------
+
+Utilizado por Garmin, Strava, etc., para incluir datos extendidos.
+
+Hijos comunes (en namespace gpxtpx):
+  └── <gpxtpx:TrackPointExtension>
+        ├── <gpxtpx:hr>       ← Frecuencia cardíaca (int, BPM)
+        ├── <gpxtpx:cad>      ← Cadencia (int, pasos o RPM)
+        ├── <gpxtpx:atemp>    ← Temperatura ambiente (opcional)
+        └── <gpxtpx:speed>    ← Velocidad (opcional, m/s)
+
+**IMPORTANTE**: Los campos en <extensions> requieren manejar correctamente el namespace (ej. gpxtpx).
+
+------------------------------------------------------------
+7. JERARQUÍA COMPLETA
+------------------------------------------------------------
+
+<gpx>
+  ├── <metadata>
+  │     ├── <link href="...">
+  │     │     └── <text>Texto</text>
+  │     └── <time>...</time>
+  └── <trk>
+        ├── <name>Nombre del track</name>
+        └── <trkseg>
+              ├── <trkpt lat="..." lon="...">
+              │     ├── <ele>1580.1</ele>
+              │     ├── <time>2024-04-02T12:34:56Z</time>
+              │     └── <extensions>
+              │           └── <gpxtpx:TrackPointExtension>
+              │                 ├── <gpxtpx:hr>154</gpxtpx:hr>
+              │                 └── <gpxtpx:cad>76</gpxtpx:cad>
+              └── ... otros <trkpt>
+
+------------------------------------------------------------
+8. OBSERVACIONES
+------------------------------------------------------------
+
+- Los <trkpt> definen la traza GPS. Cada uno es un punto secuencial.
+- La distancia NO está incluida: se infiere calculando entre puntos.
+- Las extensiones varían según el software (pueden incluir HR, cadencia, temperatura, etc.).
+- Un archivo puede tener múltiples <trkseg>, por ejemplo, si hay pausas.
+- El GPX no incluye laps, eventos, potencia o zonas de HR. Para eso se usa FIT.
+
+------------------------------------------------------------
+9. CONVERSIÓN DE CAMPOS
+------------------------------------------------------------
+
+- Lat/Lon → grados decimales (ya vienen así)
+- <ele>   → metros
+- <time>  → UTC ISO 8601 (ej. 2024-05-17T10:23:44Z)
+- <gpxtpx:hr> → frecuencia cardíaca (BPM)
+- <gpxtpx:cad> → pasos/minuto o pedaladas/minuto
+- <gpxtpx:speed> → metros/segundo (m/s)
+
+============================================================

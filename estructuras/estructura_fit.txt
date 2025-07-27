@@ -1,0 +1,185 @@
+============================================================
+ANÁLISIS ESTRUCTURAL DE ARCHIVO .FIT
+============================================================
+
+FORMATO: Binario estructurado (Flexible and Interoperable Data Transfer)
+DESARROLLADOR: Garmin
+ESPECIFICACIÓN: Versión 2.0 (más común)
+
+OBJETIVO: Almacenar datos deportivos, fisiológicos, GPS y de sensores
+TIPO DE ARCHIVO: Compacto, binario, con validación por CRC opcional
+
+------------------------------------------------------------
+1. ESTRUCTURA GLOBAL DEL ARCHIVO
+------------------------------------------------------------
+
+Un archivo .fit tiene tres secciones principales:
+
+[HEADER]        ← Información básica del archivo
+[DATA RECORDS]  ← Contiene definiciones + datos reales
+[CRC]           ← Checksum opcional (últimos 2 bytes)
+
+------------------------------------------------------------
+2. HEADER (14 o 12 BYTES)
+------------------------------------------------------------
+
+Estructura típica:
+
+  Byte(s)   | Campo              | Descripción
+  ----------|--------------------|-----------------------------------------
+     0      | header_size        | Tamaño del header (14 o 12)
+     1      | protocol_version   | Versión del protocolo (ej. 0x10 = 1.0)
+     2–3    | profile_version    | Versión del perfil de mensajes (ej. 1060 = 10.60)
+     4–7    | data_size          | Longitud en bytes de la sección de datos
+     8–11   | data_type          | Siempre '.FIT' en ASCII
+    12–13   | crc (opcional)     | Checksum del header (CRC-16-ANSI)
+
+------------------------------------------------------------
+3. DATA RECORDS
+------------------------------------------------------------
+
+Componen la mayor parte del archivo. Están organizados como:
+
+[DEFINITION MESSAGE] → [DATA MESSAGE] → [DATA MESSAGE] → ...
+
+------------------------------------------------------------
+4. DEFINITION MESSAGE
+------------------------------------------------------------
+
+Indican cómo deben interpretarse los mensajes de datos posteriores.
+
+Estructura típica:
+
+  Byte(s)   | Campo
+  ----------|------------------------
+    0       | Record Header (bit 7 = 1)
+    1       | Reserved (0x00)
+    2       | Architecture (0 = little-endian, 1 = big-endian)
+    3–4     | Global Message Number (ej. 20 = 'record')
+    5       | Número de campos
+    6+3N    | Lista de campos:
+            |   - field_def_number (1 byte)
+            |   - size (1 byte)
+            |   - base_type (1 byte)
+
+Base Types Comunes:
+  0x00 = enum (1B),  0x01 = sint8 (1B),  0x02 = uint8 (1B)
+  0x83 = sint16 (2B),  0x84 = uint16 (2B)
+  0x85 = sint32 (4B),  0x86 = uint32 (4B)
+  0x88 = string (var),  0x8C = float32,  0x8D = float64
+
+------------------------------------------------------------
+5. DATA MESSAGE
+------------------------------------------------------------
+
+Contiene los valores binarios reales. Usa el formato especificado
+por el mensaje de definición anterior.
+
+Estructura:
+  Byte 0: Record Header (bit 7 = 0)
+  Byte 1+: Valores codificados (sin etiquetas, solo binarios)
+
+------------------------------------------------------------
+6. MENSAJES COMUNES EN ARCHIVOS DE ACTIVIDAD
+------------------------------------------------------------
+
+6.1 file_id (global message 0)
+  - type (enum): 4 = activity
+  - manufacturer (enum): 1 = Garmin
+  - product (uint16): ID del modelo
+  - time_created (uint32): timestamp UTC
+
+6.2 record (global message 20)
+  Puntos GPS + sensores (uno por segundo típico)
+
+  Campo           | Tipo     | Notas
+  --------------- | -------- | ------------------------------
+  timestamp       | uint32   | En segundos desde UNIX epoch
+  position_lat    | sint32   | Formato semicircular
+  position_long   | sint32   | Formato semicircular
+  altitude        | uint16   | (valor / 5.0) - 500
+  distance        | uint32   | Metros acumulados
+  speed           | uint16   | Metros/segundo (valor / 1000)
+  heart_rate      | uint8    | Pulsaciones por minuto
+  cadence         | uint8    | Zancadas/min o RPM
+  temperature     | sint8    | °C
+  power           | uint16   | Vatios (si disponible)
+
+6.3 lap (global message 19)
+  - start_time (uint32)
+  - total_distance (float32)
+  - total_timer_time (float32)
+  - avg_heart_rate (uint8)
+
+6.4 session (global message 18)
+  - total_elapsed_time (float32)
+  - total_timer_time (float32)
+  - total_distance (float32)
+  - avg_speed (float32)
+  - total_calories (uint16)
+
+6.5 device_info (global message 23)
+  - manufacturer (enum)
+  - product (uint16)
+  - battery_level (uint8)
+
+6.6 developer_data_id + field_description
+  → Usados por Connect IQ o apps para campos personalizados
+
+------------------------------------------------------------
+7. FORMATO DE COORDENADAS GPS
+------------------------------------------------------------
+
+Latitud/longitud en semicirculares (sint32)
+
+Conversión a grados decimales:
+  grados = semicircles * (180 / 2^31)
+
+Ejemplo:
+  semicircle = 858993459
+  grados = 858993459 * 180 / 2**31 ≈ 36.0°
+
+------------------------------------------------------------
+8. UNIDADES Y ESCALAS COMUNES
+------------------------------------------------------------
+
+  - Altitud = (uint16 / 5.0) - 500
+  - Speed = (uint16 / 1000) → m/s
+  - Distance = metros acumulados (uint32)
+  - Power = vatios (raw uint16)
+  - HR = bpm (uint8)
+
+------------------------------------------------------------
+9. CRC FINAL (OPCIONAL)
+------------------------------------------------------------
+
+- Últimos 2 bytes del archivo
+- CRC-16-ANSI (polinomio 0x1021)
+- Valida la integridad del archivo
+
+------------------------------------------------------------
+10. ORDEN TÍPICO DE LOS MENSAJES
+------------------------------------------------------------
+
+file_id
+device_info
+event (start)
+lap (inicio)
+record
+record
+...
+event (stop)
+lap (cierre)
+session
+
+------------------------------------------------------------
+11. OBSERVACIONES IMPORTANTES
+------------------------------------------------------------
+
+- El archivo es secuencial y autoreferencial
+- Cada definición afecta a los datos inmediatamente posteriores
+- Pueden coexistir múltiples definiciones activas con distintos local message numbers
+- Laps, eventos, pausas, sensores externos, etc., están soportados completamente
+- Los datos deben parsearse con cuidado por definición dinámica
+
+============================================================
