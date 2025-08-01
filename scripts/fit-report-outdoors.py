@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Dream Report - Análisis profesional de archivos FIT para running de alto nivel
-Versión final corregida con enfoque en datos objetivos por lap
-Incluye tiempo acumulado y distancia acumulada
+Versión simplificada usando local_timestamp directo del archivo FIT
 """
 
 import fitdecode
@@ -12,15 +11,8 @@ from datetime import datetime, timedelta
 import os
 import sys
 from pathlib import Path
-import pytz
 
-# Opcional: para detección de timezone y ubicación desde GPS
-try:
-    from timezonefinder import TimezoneFinder
-    TIMEZONE_FINDER_AVAILABLE = True
-except ImportError:
-    TIMEZONE_FINDER_AVAILABLE = False
-
+# Opcional: para detección de ubicación desde GPS (solo para mostrar ubicación)
 try:
     import reverse_geocoder as rg
     REVERSE_GEOCODER_AVAILABLE = True
@@ -35,6 +27,7 @@ class FitDreamAnalyzer:
         self.sessions = []
         self.events = []
         self.device_info = []
+        self.activities = []  # Agregar activities
         
         # DataFrames procesados
         self.df_records = None
@@ -44,9 +37,9 @@ class FitDreamAnalyzer:
         # Análisis
         self.pauses = []
         self.key_devices = []
-        self.local_timezone = None
         self.session_start_local = None
         self.location_info = None
+        self.timezone_offset = None
         
     def load_fit_file(self):
         """Carga y procesa el archivo FIT"""
@@ -78,6 +71,8 @@ class FitDreamAnalyzer:
             self.events.append(data)
         elif msg_type == 'device_info':
             self.device_info.append(data)
+        elif msg_type == 'activity':  # Agregar activity
+            self.activities.append(data)
     
     def process_data(self):
         """Convierte y procesa todos los datos"""
@@ -89,28 +84,131 @@ class FitDreamAnalyzer:
             self.df_events = pd.DataFrame(self.events)
         
         self._process_timestamps()
-        self._detect_local_timezone()
+        self._extract_local_timestamp()
+        self._detect_location()
         self._calculate_derived_metrics()
         self._detect_pauses()
         self._identify_key_devices()
         self._calculate_lap_metrics()
-        self._filter_invalid_laps()  # Agregar filtro ANTES de calcular métricas acumuladas
+        self._filter_invalid_laps()
         self._calculate_cumulative_metrics()
     
-    def _detect_local_timezone(self):
-        """Detecta la zona horaria local y ubicación desde coordenadas GPS"""
-        if not TIMEZONE_FINDER_AVAILABLE:
-            print("⚠️  Timezonefinder no disponible - usando UTC")
+    def _extract_local_timestamp(self):
+        """Extrae local_timestamp desde activity o calcula desde nombre del archivo"""
+        local_found = False
+        
+        # 1. Buscar en activities primero
+        if self.activities and 'local_timestamp' in self.activities[0]:
+            activity_local = self.activities[0]['local_timestamp']
+            activity_utc = self.activities[0].get('timestamp')
+            
+            if activity_local and activity_utc:
+                # Normalizar ambos datetimes para poder compararlos
+                if activity_local.tzinfo is not None and activity_utc.tzinfo is None:
+                    # activity_local tiene timezone, activity_utc no
+                    activity_utc = activity_utc.replace(tzinfo=activity_local.tzinfo)
+                elif activity_local.tzinfo is None and activity_utc.tzinfo is not None:
+                    # activity_utc tiene timezone, activity_local no
+                    activity_local = activity_local.replace(tzinfo=activity_utc.tzinfo)
+                
+                self.session_start_local = activity_local
+                offset_hours = (activity_local - activity_utc).total_seconds() / 3600
+                self.timezone_offset = int(round(offset_hours))
+                print(f"🕒 Hora local desde activity: {activity_local.strftime('%d/%m/%Y %H:%M:%S')} (UTC{self.timezone_offset:+d})")
+                local_found = True
+        
+        # 2. Buscar en session como fallback
+        if not local_found and self.sessions and 'local_timestamp' in self.sessions[0]:
+            session_local = self.sessions[0]['local_timestamp']
+            session_utc = self.sessions[0].get('start_time', self.sessions[0].get('timestamp'))
+            
+            if session_local and session_utc:
+                # Normalizar ambos datetimes
+                if session_local.tzinfo is not None and session_utc.tzinfo is None:
+                    session_utc = session_utc.replace(tzinfo=session_local.tzinfo)
+                elif session_local.tzinfo is None and session_utc.tzinfo is not None:
+                    session_local = session_local.replace(tzinfo=session_utc.tzinfo)
+                
+                self.session_start_local = session_local
+                offset_hours = (session_local - session_utc).total_seconds() / 3600
+                self.timezone_offset = int(round(offset_hours))
+                print(f"🕒 Hora local desde session: {session_local.strftime('%d/%m/%Y %H:%M:%S')} (UTC{self.timezone_offset:+d})")
+                local_found = True
+        
+        # 3. Calcular desde nombre del archivo como último recurso
+        if not local_found:
+            filename = os.path.basename(self.fit_file_path)
+            session_utc = None
+            
+            if self.sessions:
+                session_utc = self.sessions[0].get('start_time', self.sessions[0].get('timestamp'))
+            
+            if session_utc and 'h' in filename:
+                try:
+                    # Buscar patrón como "17h27"
+                    parts = filename.split('_')
+                    for part in parts:
+                        if 'h' in part:
+                            time_part = part.replace('.fit', '')
+                            hour, minute = time_part.split('h')
+                            
+                            # Crear timestamp local aproximado
+                            local_hour = int(hour)
+                            local_minute = int(minute)
+                            
+                            # Obtener hora UTC sin timezone para comparar
+                            if session_utc.tzinfo is not None:
+                                utc_hour = session_utc.hour
+                                utc_minute = session_utc.minute
+                            else:
+                                utc_hour = session_utc.hour
+                                utc_minute = session_utc.minute
+                            
+                            # Calcular offset
+                            offset_hours = (local_hour - utc_hour) % 24
+                            if offset_hours > 12:
+                                offset_hours -= 24
+                            
+                            # Crear timestamp local estimado
+                            from datetime import timedelta
+                            if session_utc.tzinfo is not None:
+                                # Remover timezone para hacer el cálculo
+                                utc_naive = session_utc.replace(tzinfo=None)
+                                self.session_start_local = utc_naive + timedelta(hours=offset_hours)
+                            else:
+                                self.session_start_local = session_utc + timedelta(hours=offset_hours)
+                            
+                            self.timezone_offset = offset_hours
+                            
+                            print(f"🕒 Hora calculada desde filename: {self.session_start_local.strftime('%d/%m/%Y %H:%M:%S')} (UTC{self.timezone_offset:+d})")
+                            local_found = True
+                            break
+                except Exception as e:
+                    print(f"⚠️  Error calculando desde filename: {e}")
+        
+        # 4. Fallback final a UTC
+        if not local_found and self.sessions:
+            session_utc = self.sessions[0].get('start_time', self.sessions[0].get('timestamp'))
+            if session_utc:
+                # Remover timezone info si existe para tratarlo como local
+                if session_utc.tzinfo is not None:
+                    self.session_start_local = session_utc.replace(tzinfo=None)
+                else:
+                    self.session_start_local = session_utc
+                self.timezone_offset = 0
+                print(f"🕒 Usando start_time (UTC): {self.session_start_local.strftime('%d/%m/%Y %H:%M:%S')}")
+        
+        if not local_found and not self.sessions:
+            print("⚠️  No se encontró información de timestamp")
+    
+    def _detect_location(self):
+        """Detecta ubicación desde coordenadas GPS (solo para mostrar ubicación)"""
+        if not REVERSE_GEOCODER_AVAILABLE:
             return
         
         # Buscar coordenadas GPS en records
         if self.df_records is None:
-            print("📍 Sin datos de GPS disponibles")
             return
-        
-        # Debug: verificar qué campos de posición existen
-        position_fields = [col for col in self.df_records.columns if 'position' in col.lower()]
-        print(f"🔍 Campos de posición detectados: {position_fields}")
         
         if 'position_lat' in self.df_records.columns and 'position_long' in self.df_records.columns:
             # Obtener primera coordenada válida
@@ -130,51 +228,19 @@ class FitDreamAnalyzer:
                 lat = lat_semicircles * (180 / (2**31))
                 lng = lng_semicircles * (180 / (2**31))
                 
-                print(f"📍 Coordenadas detectadas: {lat:.4f}, {lng:.4f}")
-                
-                # Detectar timezone
-                try:
-                    tf = TimezoneFinder()
-                    timezone_str = tf.timezone_at(lat=lat, lng=lng)
-                    
-                    if timezone_str:
-                        self.local_timezone = pytz.timezone(timezone_str)
-                        print(f"🌍 Timezone detectado: {timezone_str}")
-                        
-                        # Convertir hora de inicio a local
-                        if self.sessions and 'start_time' in self.sessions[0]:
-                            utc_time = self.sessions[0]['start_time']
-                            if utc_time.tzinfo is None:
-                                utc_time = pytz.utc.localize(utc_time)
-                            self.session_start_local = utc_time.astimezone(self.local_timezone)
-                    else:
-                        print("⚠️  No se pudo determinar timezone desde coordenadas")
-                        
-                except Exception as e:
-                    print(f"⚠️  Error detectando timezone: {e}")
-                
                 # Detectar ubicación con reverse geocoding
-                if REVERSE_GEOCODER_AVAILABLE:
-                    try:
-                        location_results = rg.search([(lat, lng)])
-                        if location_results:
-                            location = location_results[0]
-                            city = location.get('name', 'Unknown')
-                            admin1 = location.get('admin1', '')
-                            country = location.get('cc', '')
-                            
-                            self.location_info = f"{city}, {admin1}, {country}"
-                            print(f"🏃‍♂️ Ubicación: {self.location_info}")
-                        else:
-                            print("⚠️  No se pudo determinar ubicación")
-                    except Exception as e:
-                        print(f"⚠️  Error detectando ubicación: {e}")
-                else:
-                    print("⚠️  reverse_geocoder no disponible para ubicación")
-            else:
-                print("📍 Sin coordenadas GPS válidas en los records")
-        else:
-            print("📍 Sin campos de coordenadas GPS en el archivo")
+                try:
+                    location_results = rg.search([(lat, lng)])
+                    if location_results:
+                        location = location_results[0]
+                        city = location.get('name', 'Unknown')
+                        admin1 = location.get('admin1', '')
+                        country = location.get('cc', '')
+                        
+                        self.location_info = f"{city}, {admin1}, {country}"
+                        print(f"🏃 Ubicación: {self.location_info}")
+                except Exception as e:
+                    print(f"⚠️  Error detectando ubicación: {e}")
     
     def _process_timestamps(self):
         """Procesa timestamps para análisis temporal"""
@@ -381,17 +447,15 @@ class FitDreamAnalyzer:
     def _print_header(self):
         """Header del reporte"""
         print("\n" + "="*80)
-        print("🏃‍♂️ DREAM REPORT - ANÁLISIS DE RENDIMIENTO")
+        print("🏃 DREAM REPORT - ANÁLISIS DE RENDIMIENTO")
         print("="*80)
         
-        if self.sessions:
-            session = self.sessions[0]
-            if self.session_start_local:
-                date_str = self.session_start_local.strftime('%d/%m/%Y %H:%M %Z')
-                print(f"📅 Sesión: {date_str}")
-            elif 'start_time' in session:
-                date_str = session['start_time'].strftime('%d/%m/%Y %H:%M UTC')
-                print(f"📅 Sesión: {date_str}")
+        if self.session_start_local:
+            if self.timezone_offset is not None and self.timezone_offset != 0:
+                date_str = self.session_start_local.strftime('%d/%m/%Y %H:%M') + f" (UTC{self.timezone_offset:+d})"
+            else:
+                date_str = self.session_start_local.strftime('%d/%m/%Y %H:%M (hora local)')
+            print(f"📅 Sesión: {date_str}")
         
         # Mostrar ubicación si está disponible
         if self.location_info:
@@ -703,7 +767,7 @@ class FitDreamAnalyzer:
                 'avg_step_length_m', 'gct_imbalance_ms',
                 'avg_vertical_oscillation', 'avg_stance_time', 'avg_stance_time_balance',
                 'total_ascent', 'total_descent',
-                'avg_temperature', 'total_calories'  # Agregar calorías aquí
+                'avg_temperature', 'total_calories'
             ]
             
             available_cols = [col for col in lap_analysis_cols if col in self.df_laps.columns]
@@ -759,7 +823,11 @@ class FitDreamAnalyzer:
             f.write(f"Actividad: {os.path.basename(self.fit_file_path)}\n")
             
             if self.session_start_local:
-                f.write(f"Fecha: {self.session_start_local.strftime('%d/%m/%Y %H:%M %Z')}\n")
+                if self.timezone_offset is not None and self.timezone_offset != 0:
+                    date_str = self.session_start_local.strftime('%d/%m/%Y %H:%M') + f" (UTC{self.timezone_offset:+d})"
+                else:
+                    date_str = self.session_start_local.strftime('%d/%m/%Y %H:%M (hora local)')
+                f.write(f"Fecha: {date_str}\n")
             
             if self.location_info:
                 f.write(f"Ubicación: {self.location_info}\n")
@@ -838,19 +906,21 @@ class FitDreamAnalyzer:
                         hr = int(lap['avg_heart_rate']) if pd.notna(lap['avg_heart_rate']) else 'N/A'
                         power = int(lap['avg_power']) if pd.notna(lap['avg_power']) else 'N/A'
                         
-                        # Métricas acumuladas
-                        cum_time = lap.get('cumulative_time', 0)
-                        cum_time_str = self._format_time(cum_time)
-                        cum_dist = lap.get('cumulative_distance', 0) / 1000
-                        cum_dist_str = f"{cum_dist:.1f}km"
+                        # Duración del lap individual
+                        lap_duration = lap.get('total_timer_time', 0)
+                        lap_duration_str = self._format_time(lap_duration)
                         
-                        # Delta de altitud (ascent - descent)
+                        # Distancia del lap individual
+                        lap_distance = lap.get('total_distance', 0) / 1000
+                        lap_distance_str = f"{lap_distance:.1f}km"
+                        
+                        # Delta de altitud del lap individual
                         ascent = int(lap.get('total_ascent', 0))
                         descent = int(lap.get('total_descent', 0))
                         altitude_delta = ascent - descent
                         delta_str = f"{altitude_delta:+d}m" if altitude_delta != 0 else "±0m"
                         
-                        f.write(f"   {idx}. Lap {lap_idx + 1}: {pace_str}/km | {hr} bpm | {power} W | {cum_time_str} | {cum_dist_str} | {delta_str}\n")
+                        f.write(f"   {idx}. Lap {lap_idx + 1}: {pace_str}/km | {hr} bpm | {power} W | {lap_duration_str} | {lap_distance_str} | {delta_str}\n")
             
             f.write(f"\n" + "=" * 100 + "\n")
             f.write("📋 Este archivo se puede copiar/pegar en Excel o Google Sheets\n")
@@ -878,10 +948,6 @@ def main():
     analyzer.process_data()
     analyzer.generate_report()
     analyzer.export_data()
-    
-    if not TIMEZONE_FINDER_AVAILABLE:
-        print("\n💡 TIP: Instala 'timezonefinder' para detección automática de zona horaria:")
-        print("   pip install timezonefinder")
     
     if not REVERSE_GEOCODER_AVAILABLE:
         print("\n💡 TIP: Instala 'reverse_geocoder' para detección de ubicación:")
