@@ -1,0 +1,8 @@
+Session Information
+==================
+Original File: 2.6k_25-07-25_19h33.fit
+Distance: 2.6k
+Date: 25-07-25
+Time: 19h33
+Activity Type: outdoor
+Report Generated: 25-07-25_19h33_2.6k_outdoor

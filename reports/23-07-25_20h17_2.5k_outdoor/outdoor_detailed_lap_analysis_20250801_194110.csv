@@ -1,0 +1,4 @@
+,total_timer_time,total_distance,pace_calculated,cumulative_time,cumulative_distance,avg_heart_rate,max_heart_rate,avg_power,max_power,avg_running_cadence_corrected,max_running_cadence_corrected,avg_step_length_m,gct_imbalance_ms,avg_vertical_oscillation,avg_stance_time,avg_stance_time_balance,avg_temperature,total_calories,total_ascent,total_descent
+1,347.935,1000.0,5.798916666666667,347.935,1000.0,141,157,297,410,164,172,1.0299,,91.3,265.2,,,70,12,6
+2,370.631,1000.0,6.177183333333333,718.566,2000.0,154,161,282,392,164,170,0.9886,,90.0,271.8,,,77,12,5
+3,182.047,534.89,5.672412396318246,900.613,2534.89,143,157,258,381,154,176,1.0423,,91.8,263.4,,,37,0,2

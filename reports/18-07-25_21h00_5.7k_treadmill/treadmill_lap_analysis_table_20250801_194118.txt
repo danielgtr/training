@@ -1,0 +1,25 @@
+🏁 ANÁLISIS DETALLADO POR LAP - TREADMILL
+==========================================================================================
+Actividad: 5.7k_18-07-25_21h00_treadmill.fit
+Fecha: 18/07/2025 21:00 (UTC-6)
+Modalidad: Treadmill
+
+Lap | Pace    | Dist  | Cum Time | Cum Dist | HR Avg/Max | Power Avg/Max | Cadence Avg/Max | Step Length
+--------------------------------------------------------------------------------------------------------
+ 1  | 5:06    | 1.7km | 8:32     | 1.7km    | 178/190     | 308/336       | 178/182         | 1.09m      
+ 2  | 20:37   | 0.9km | 27:50    | 2.6km    | 129/182     | 58/304        | 74/166          | 0.74m      
+ 3  | 5:08    | 0.8km | 32:07    | 3.4km    | 178/185     | 310/319       | 178/180         | 1.09m      
+ 4  | 11:25   | 0.4km | 37:14    | 3.9km    | 144/186     | 111/411       | 112/178         | 0.80m      
+ 5  | 5:08    | 0.8km | 41:30    | 4.7km    | 159/165     | 308/328       | 178/182         | 1.08m      
+
+🥇 TOP 3 LAPS MÁS RÁPIDOS:
+   1. Lap 1: 5:06/km | 178 bpm | 308 W | 8:32 | 1.7km
+   2. Lap 3: 5:08/km | 178 bpm | 310 W | 4:16 | 0.8km
+   3. Lap 5: 5:08/km | 159 bpm | 308 W | 4:16 | 0.8km
+
+==========================================================================================
+📋 Este archivo se puede copiar/pegar en Excel o Google Sheets
+📊 Los datos también están disponibles en CSV para análisis avanzado
+⏱️  Cum Time = Tiempo acumulado hasta ese lap
+📏 Cum Dist = Distancia acumulada hasta ese lap
+🏃 Modalidad: Treadmill (sin datos GPS de elevación)

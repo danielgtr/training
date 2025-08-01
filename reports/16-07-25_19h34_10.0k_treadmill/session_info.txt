@@ -1,0 +1,8 @@
+Session Information
+==================
+Original File: 10.0k_16-07-25_19h34_treadmill.fit
+Distance: 10.0k
+Date: 16-07-25
+Time: 19h34
+Activity Type: treadmill
+Report Generated: 16-07-25_19h34_10.0k_treadmill

@@ -1,0 +1,21 @@
+🏁 ANÁLISIS DETALLADO POR LAP
+====================================================================================================
+Actividad: 2.5k_23-07-25_20h17.fit
+Fecha: 23/07/2025 20:17 (UTC-6)
+
+Lap | Pace    | Dist  | Cum Time | Cum Dist | HR Avg/Max | Power Avg/Max | Cadence Avg/Max | Step Length | GCT Imb | Elev +/-
+-----------------------------------------------------------------------------------------------------------------------------
+ 1  | 5:47    | 1.0km | 5:47     | 1.0km    | 141/157     | 297/410       | 164/172         | 1.03m       | N/A     | +12/-6
+ 2  | 6:10    | 1.0km | 11:58    | 2.0km    | 154/161     | 282/392       | 164/170         | 0.99m       | N/A     | +12/-5
+ 3  | 5:40    | 0.5km | 15:00    | 2.5km    | 143/157     | 258/381       | 154/176         | 1.04m       | N/A     | +0/-2
+
+🥇 TOP 3 LAPS MÁS RÁPIDOS:
+   1. Lap 3: 5:40/km | 143 bpm | 258 W | 3:02 | 0.5km | -2m
+   2. Lap 1: 5:47/km | 141 bpm | 297 W | 5:47 | 1.0km | +6m
+   3. Lap 2: 6:10/km | 154 bpm | 282 W | 6:10 | 1.0km | +7m
+
+====================================================================================================
+📋 Este archivo se puede copiar/pegar en Excel o Google Sheets
+📊 Los datos también están disponibles en CSV para análisis avanzado
+⏱️  Cum Time = Tiempo acumulado hasta ese lap
+📏 Cum Dist = Distancia acumulada hasta ese lap
