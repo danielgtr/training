@@ -1,0 +1,127 @@
+# 🧭 Informe Técnico: Estructura de Archivos FIT en Actividades Treadmill
+
+Este informe resume los hallazgos obtenidos mediante **análisis empírico y exploración directa de archivos .fit generados en actividades tipo "treadmill"** (caminadora), utilizando datos exportados desde un dispositivo Garmin.
+
+> **Nota importante:** Aunque algunas de las observaciones podrían estar presentes también en otras modalidades (como running outdoor), **todo lo aquí documentado proviene específicamente de archivos `treadmill`**, y **solo se afirma exclusividad si hay evidencia concluyente.**
+
+---
+
+## ✅ Características Confirmadas de Actividades Treadmill en Archivos `.fit`
+
+### 1. **Identificación Explícita del Tipo de Actividad**
+
+* Campo `sub_sport = treadmill` presente en:
+
+  * Mensaje `session`
+  * Mensaje `lap`
+  * Mensaje `sport`
+* Campo `unknown_110 = 'Treadmill'` en mensaje `session`
+* Campo `sport.name = 'Treadmill'`
+
+> ✅ **Estos campos son marcadores exclusivos y confiables** de actividad tipo treadmill.
+
+---
+
+### 2. **Ausencia de Coordenadas GPS**
+
+* Ningún mensaje contiene `position_lat` ni `position_long`
+* No hay mensajes `event` relacionados con GPS
+
+> ✅ Esta ausencia es típica y esperada en actividades treadmill. **Confirmado como rasgo característico.**
+
+---
+
+### 3. **Hora Local Implícita en los Datos**
+
+* Mensaje `activity` contiene `local_timestamp`
+* Mensaje `session` contiene `start_time` en UTC
+* Mensaje `timestamp_correlation` también muestra ambos
+
+> ✅ A partir de la diferencia (`local_timestamp - start_time`) se puede estimar la zona horaria configurada en el dispositivo (**UTC-6** en el ejemplo analizado).
+
+---
+
+### 4. **Cadencia Almacenada por Pierna**
+
+* Campo `avg_running_cadence = 83`
+* Cadencia real estimada = `83 x 2 = 166` spm
+* Se aplica también en `record`, `lap`, `session`
+
+> ✅ Confirmado que **Garmin guarda cadencia por pierna**, y se debe multiplicar por 2 para obtener spm reales.
+
+---
+
+### 5. **Presencia de Métricas Biomecánicas Avanzadas**
+
+* Campos presentes en `record`, `lap`, `session`:
+
+  * `stance_time`
+  * `vertical_oscillation`
+  * `vertical_ratio`
+  * `step_length`
+  * `fractional_cadence`
+
+> ⚠️ Aunque estos campos suelen provenir de sensores externos como el HRM-Pro Plus, en este caso se confirmaron **aun sin haber sido usado activamente un sensor HRM durante la actividad**. El reloj parece estimarlos internamente o los toma de sensores previos emparejados.
+
+---
+
+### 6. **Datos de Potencia y Trabajo**
+
+* Campo `power` presente en `record`
+* Campo `accumulated_power` acumulativo a lo largo de los segundos
+* Campo `total_work` en `session` coincide con el último `accumulated_power`
+
+> ✅ Confirmado: Garmin calcula `total_work` a partir del `record.accumulated_power`
+
+---
+
+### 7. **Calorías por Lap y Totales**
+
+* Campo `total_calories` presente tanto en `session` como en cada `lap`
+* La suma de calorías por lap concuerda (aproximadamente) con el total de sesión
+
+> ✅ Confirmado: Garmin desagrega calorías por lap incluso en treadmill
+
+---
+
+### 8. **Campos `unknown_XXX` Abundantemente Presentes**
+
+* Tipos detectados: `unknown_140`, `unknown_216`, `unknown_312`, `unknown_313`, `unknown_233`, entre otros
+* Algunos contienen nombres de sensores externos **que no estaban conectados durante la actividad**, sino previamente emparejados (ej. `'HRMPro+:604868'`, `'AirPo'`, `'X16'`)
+* Otros contienen valores numéricos no triviales:
+
+  * `unknown_168`, `unknown_178`, `unknown_196`, `unknown_192`, `unknown_193`
+  * Algunos tienen posibles relaciones con carga de entrenamiento, eficiencia, etc.
+
+> ⚠️ **No se afirma que estos campos sean exclusivos de treadmill**, pero **su activación en este contexto sugiere codificación propietaria de Garmin para métricas no públicas.**
+
+---
+
+## ⚖️ Comparaciones y Validaciones Internas
+
+| Elemento Comparado                         | Resultado                        |
+| ------------------------------------------ | -------------------------------- |
+| `record.distance` vs `session.distance`    | ❌ Diferente (10,657m vs 10,000m) |
+| `record.accumulated_power` vs `total_work` | ✅ Igual (1,040,138)              |
+| `lap.total_timer_time` suma vs sesión      | ✅ Muy cercano                    |
+
+> 📌 La discrepancia en distancia se debe a que Garmin permite ajustar manualmente la distancia de la caminadora al finalizar la actividad. En este caso, el usuario la ajustó a 10,000 metros, aunque los `records` acumulaban 10,657.
+
+> 📌 Ambos valores (`record.distance` y `session.distance`) son estimaciones: uno generado por el reloj, el otro por la caminadora. Ninguno debe considerarse como "real" por defecto; dependen de la calibración de cada fuente.
+
+---
+
+## 🔍 Conclusiones Finales
+
+* Los archivos `.fit` de treadmill **tienen una estructura rica y particular**, incluso sin GPS.
+* Incluyen datos de rendimiento, biomecánicos y energéticos que **no requieren ubicación geográfica para ser útiles**.
+* Garmin parece codificar información experimental o interna en campos `unknown_XXX`.
+* Muchas de estas estructuras probablemente **no se documentan en el SDK oficial**, pero son consistentes y explotables empíricamente.
+
+---
+
+## 📁 Archivos Analizados
+
+* `19757483834_ACTIVITY-treadmill.fit` (actividad tipo treadmill, 10k)
+* Análisis realizado mediante scripts personalizados en Python (`fitparse`, decodificación estructural, comparación cruzada)
+
