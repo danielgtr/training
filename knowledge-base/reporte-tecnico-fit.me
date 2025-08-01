@@ -1,0 +1,148 @@
+📘 Reporte Técnico: Estructura y Análisis de Archivos FIT para Running de Alto Nivel
+🧾 1. FORMATO Y TIPO DE ARCHIVO
+
+    Tipo: .fit (Flexible and Interoperable Data Transfer)
+
+    Codificación: Binaria, requiere parser (ej. fitdecode, python-fitparse)
+
+    Componentes principales:
+
+        file_id: Metadata del archivo
+
+        device_info: Información del dispositivo Garmin
+
+        record: Datos por segundo o por punto de muestreo
+
+        lap: Agregados por vuelta
+
+        session: Totales de la sesión
+
+        event: Eventos como pausa, lap manual, etc.
+
+        developer_data: Campos personalizados (por sensores externos)
+
+📂 2. MENSAJES DISPONIBLES Y SU ROL
+✅ Mensajes clave y su uso:
+Tipo de mensaje	Descripción	Frecuencia
+record	Datos de cada punto de tiempo (1Hz o menor)	Muy frecuente
+lap	Agregados por vuelta	1 por lap
+session	Agregado total de la sesión	1 por actividad
+event	Marca eventos como inicio, pausa, vuelta	Variable
+developer_data	Campos extendidos no estándar	Opcional
+📊 3. CAMPOS DISPONIBLES POR TIPO
+📌 record
+
+    Contiene métricas por punto de tiempo (como segundos):
+
+        Potencia: power (W)
+
+        Cadencia: cadence (pasos/min)
+
+        Heart Rate: heart_rate (bpm)
+
+        Velocidad: enhanced_speed (m/s) → Convertir a km/h
+
+        Altura: enhanced_altitude (m)
+
+        Dinámica avanzada:
+
+            step_length (mm o cm)
+
+            stance_time, stance_time_balance (ms / %)
+
+            vertical_oscillation, vertical_ratio (mm, %)
+
+        ⚠️ Lat/Long: position_lat, position_long → poco útil para análisis
+
+        ❌ stride_length no existe como campo; usar step_length
+
+📌 lap
+
+    Agregados por vuelta:
+
+        Duración: total_timer_time
+
+        Distancia: total_distance
+
+        HR media/máxima: avg_heart_rate, max_heart_rate
+
+        Potencia media/máxima: avg_power, max_power
+
+        Velocidad máxima: enhanced_max_speed
+
+        Altura máx/min: enhanced_max_altitude, enhanced_min_altitude
+
+        Ascenso/descenso: total_ascent, total_descent
+
+        Cadencia:
+
+            avg_running_cadence sí existe (en pasos/min)
+
+            ❌ avg_cadence y max_cadence NO existen (no están en laps)
+
+        Dinámica avanzada: avg_stance_time, avg_step_length, avg_vertical_oscillation, avg_vertical_ratio
+
+📌 session
+
+    Totales similares a lap pero en la agregación completa
+
+    Puede contener normalized_power, total_work, training_effect, pero no todos son confiables o están presentes
+
+🔍 4. OBSERVACIONES SOBRE FORMATO Y TRATAMIENTO
+➤ Velocidad y Ritmo
+
+    Velocidad cruda: enhanced_speed (m/s)
+
+    Conversión a pace: pace = 16.6667 / speed_mps → min/km
+
+    enhanced_avg_speed en lap y session puede estar vacía → derivar desde record
+
+➤ Step Length y Cadencia
+
+    step_length en record es confiable
+
+    cadence es en pasos/min, siempre individual (no de pierna)
+
+    Combinar cadence + step_length → derivar velocidad real (si falta)
+
+➤ Ground Contact Time
+
+    stance_time está en milisegundos
+
+    stance_time_balance está en porcentaje (ej. 51.2%)
+
+    Se puede derivar:
+
+    left_ct = stance_time * (balance / 100)
+    right_ct = stance_time * (1 - balance / 100)
+
+➤ Elevación
+
+    enhanced_altitude está disponible en record
+
+    total_ascent y total_descent están en lap pero pueden recalcularse
+
+    Cambios de elevación por lap se pueden inferir haciendo max - min si se desean
+
+🧪 5. VALIDACIONES Y TESTEOS NECESARIOS
+Verificación	Justificación
+¿Qué campos existen y en qué %?	Evita fallos con .get() o KeyError
+¿Hay valores nulos?	Evita métricas rotas o mal calculadas
+¿Qué métricas están en record vs lap?	Permite decidir si derivar o usar raw
+¿Coinciden las vueltas entre lap y event?	Verifica integridad temporal
+¿Qué contiene developer_data?	Puede tener métricas nuevas de sensores
+✅ 6. RECOMENDACIONES PARA SCRIPTS AVANZADOS
+
+    Cargar todo record y lap como DataFrame separados
+
+    Validar y derivar:
+
+        Velocidad media si no está presente
+
+        Cadencia media desde record si falta en lap
+
+    Usar timestamp para agrupar records por lap (si fuera necesario)
+
+    Excluir position_lat, position_long, unknown_* por defecto
+
+    Exportar CSV con columnas limpias, relevantes y ordenadas
