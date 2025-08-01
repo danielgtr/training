@@ -703,7 +703,7 @@ class FitDreamAnalyzer:
                 'avg_step_length_m', 'gct_imbalance_ms',
                 'avg_vertical_oscillation', 'avg_stance_time', 'avg_stance_time_balance',
                 'total_ascent', 'total_descent',
-                'avg_temperature'
+                'avg_temperature', 'total_calories'  # Agregar calorías aquí
             ]
             
             available_cols = [col for col in lap_analysis_cols if col in self.df_laps.columns]
