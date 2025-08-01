@@ -1,0 +1,31 @@
+🏁 ANÁLISIS DETALLADO POR LAP - TREADMILL
+==========================================================================================
+Actividad: 10.0k_16-07-25_19h34_treadmill.fit
+Fecha: 16/07/2025 19:34 (UTC-6)
+Modalidad: Treadmill
+
+Lap | Pace    | Dist  | Cum Time | Cum Dist | HR Avg/Max | Power Avg/Max | Cadence Avg/Max | Step Length
+--------------------------------------------------------------------------------------------------------
+ 1  | 5:40    | 1.0km | 5:40     | 1.0km    | 141/153     | 287/308       | 166/170         | 1.06m      
+ 2  | 5:36    | 1.0km | 11:17    | 2.0km    | 154/157     | 289/303       | 166/170         | 1.07m      
+ 3  | 5:37    | 1.0km | 16:54    | 3.0km    | 154/160     | 288/317       | 166/170         | 1.07m      
+ 4  | 5:35    | 1.0km | 22:30    | 4.0km    | 155/159     | 291/314       | 166/172         | 1.07m      
+ 5  | 5:36    | 1.0km | 28:06    | 5.0km    | 156/160     | 290/313       | 166/170         | 1.07m      
+ 6  | 5:38    | 1.0km | 33:45    | 6.0km    | 157/161     | 289/311       | 166/170         | 1.07m      
+ 7  | 5:35    | 1.0km | 39:21    | 7.0km    | 159/164     | 289/303       | 166/168         | 1.08m      
+ 8  | 5:37    | 1.0km | 44:58    | 8.0km    | 159/163     | 289/306       | 166/172         | 1.07m      
+ 9  | 5:45    | 1.0km | 50:43    | 9.0km    | 160/164     | 283/309       | 164/170         | 1.08m      
+10  | 5:37    | 1.0km | 56:21    | 10.0km   | 162/165     | 290/314       | 166/174         | 1.07m      
+11  | 5:33    | 0.7km | 1:00:00  | 10.7km   | 162/164     | 291/299       | 166/170         | 1.08m      
+
+🥇 TOP 3 LAPS MÁS RÁPIDOS:
+   1. Lap 11: 5:33/km | 162 bpm | 291 W | 3:39 | 0.7km
+   2. Lap 4: 5:35/km | 155 bpm | 291 W | 5:35 | 1.0km
+   3. Lap 7: 5:35/km | 159 bpm | 289 W | 5:35 | 1.0km
+
+==========================================================================================
+📋 Este archivo se puede copiar/pegar en Excel o Google Sheets
+📊 Los datos también están disponibles en CSV para análisis avanzado
+⏱️  Cum Time = Tiempo acumulado hasta ese lap
+📏 Cum Dist = Distancia acumulada hasta ese lap
+🏃 Modalidad: Treadmill (sin datos GPS de elevación)

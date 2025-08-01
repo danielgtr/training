@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Dream Report - Análisis profesional de archivos FIT para running de alto nivel
-Versión simplificada usando local_timestamp directo del archivo FIT
+Dream Report - Análisis unificado de archivos FIT para running
+Detecta automáticamente si es treadmill o outdoor y aplica el procesamiento apropiado
 """
 
 import fitdecode
@@ -12,14 +12,14 @@ import os
 import sys
 from pathlib import Path
 
-# Opcional: para detección de ubicación desde GPS (solo para mostrar ubicación)
+# Opcional: para detección de ubicación desde GPS (solo para outdoor)
 try:
     import reverse_geocoder as rg
     REVERSE_GEOCODER_AVAILABLE = True
 except ImportError:
     REVERSE_GEOCODER_AVAILABLE = False
 
-class FitDreamAnalyzer:
+class FitUnifiedAnalyzer:
     def __init__(self, fit_file_path):
         self.fit_file_path = fit_file_path
         self.records = []
@@ -27,7 +27,7 @@ class FitDreamAnalyzer:
         self.sessions = []
         self.events = []
         self.device_info = []
-        self.activities = []  # Agregar activities
+        self.activities = []
         
         # DataFrames procesados
         self.df_records = None
@@ -40,6 +40,10 @@ class FitDreamAnalyzer:
         self.session_start_local = None
         self.location_info = None
         self.timezone_offset = None
+        
+        # Detección de modalidad
+        self.is_treadmill = False
+        self.activity_type = "unknown"
         
     def load_fit_file(self):
         """Carga y procesa el archivo FIT"""
@@ -71,11 +75,42 @@ class FitDreamAnalyzer:
             self.events.append(data)
         elif msg_type == 'device_info':
             self.device_info.append(data)
-        elif msg_type == 'activity':  # Agregar activity
+        elif msg_type == 'activity':
             self.activities.append(data)
+    
+    def _detect_activity_type(self):
+        """Detecta si es treadmill o outdoor basado en sub_sport field"""
+        self.is_treadmill = False
+        self.activity_type = "outdoor"  # default
+        
+        # Verificar en sessions primero
+        if self.sessions:
+            for session in self.sessions:
+                sub_sport = session.get('sub_sport')
+                if sub_sport == 'treadmill':
+                    self.is_treadmill = True
+                    self.activity_type = "treadmill"
+                    print(f"🏃 Modalidad detectada: Treadmill")
+                    return
+        
+        # Verificar en laps como fallback
+        if self.laps:
+            for lap in self.laps:
+                sub_sport = lap.get('sub_sport')
+                if sub_sport == 'treadmill':
+                    self.is_treadmill = True
+                    self.activity_type = "treadmill"
+                    print(f"🏃 Modalidad detectada: Treadmill (desde laps)")
+                    return
+        
+        # Si no se encuentra treadmill, asumir outdoor
+        print(f"🏃 Modalidad detectada: Outdoor")
     
     def process_data(self):
         """Convierte y procesa todos los datos"""
+        # Detectar tipo de actividad primero
+        self._detect_activity_type()
+        
         if self.records:
             self.df_records = pd.DataFrame(self.records)
         if self.laps:
@@ -85,7 +120,11 @@ class FitDreamAnalyzer:
         
         self._process_timestamps()
         self._extract_local_timestamp()
-        self._detect_location()
+        
+        # Solo detectar ubicación si es outdoor
+        if not self.is_treadmill:
+            self._detect_location()
+        
         self._calculate_derived_metrics()
         self._detect_pauses()
         self._identify_key_devices()
@@ -145,11 +184,11 @@ class FitDreamAnalyzer:
             
             if session_utc and 'h' in filename:
                 try:
-                    # Buscar patrón como "17h27"
+                    # Buscar patrón como "17h27" o "21h49"
                     parts = filename.split('_')
                     for part in parts:
                         if 'h' in part:
-                            time_part = part.replace('.fit', '')
+                            time_part = part.replace('.fit', '').replace('_treadmill', '')
                             hour, minute = time_part.split('h')
                             
                             # Crear timestamp local aproximado
@@ -202,8 +241,8 @@ class FitDreamAnalyzer:
             print("⚠️  No se encontró información de timestamp")
     
     def _detect_location(self):
-        """Detecta ubicación desde coordenadas GPS (solo para mostrar ubicación)"""
-        if not REVERSE_GEOCODER_AVAILABLE:
+        """Detecta ubicación desde coordenadas GPS (solo para outdoor)"""
+        if not REVERSE_GEOCODER_AVAILABLE or self.is_treadmill:
             return
         
         # Buscar coordenadas GPS en records
@@ -281,7 +320,7 @@ class FitDreamAnalyzer:
     
     def _calculate_lap_metrics(self):
         """Calcula métricas por lap desde records"""
-        if self.df_laps is None or self.df_records is None:
+        if self.df_laps is None:
             return
         
         # Calcular pace real por lap
@@ -290,6 +329,22 @@ class FitDreamAnalyzer:
                 lambda row: (row['total_timer_time'] / 60) / (row['total_distance'] / 1000) 
                 if row['total_distance'] > 0 else np.nan, axis=1
             )
+        
+        # Para treadmill: detectar si hay calibración manual comparando con session
+        if self.is_treadmill and self.sessions:
+            session_distance = self.sessions[0].get('total_distance', 0)
+            lap_total_distance = self.df_laps['total_distance'].sum()
+            
+            if abs(lap_total_distance - session_distance) > 50:
+                # Hay diferencia significativa - agregar columnas comparativas
+                self.df_laps['garmin_distance'] = self.df_laps['total_distance'] * (session_distance / lap_total_distance)
+                self.df_laps['calibrated_distance'] = self.df_laps['total_distance']
+                
+                # Calcular pace con distancia Garmin también
+                self.df_laps['pace_garmin'] = self.df_laps.apply(
+                    lambda row: (row['total_timer_time'] / 60) / (row['garmin_distance'] / 1000) 
+                    if row['garmin_distance'] > 0 else np.nan, axis=1
+                )
         
         # Corregir cadencia en laps - multiplicar por 2
         if 'avg_running_cadence' in self.df_laps.columns:
@@ -377,7 +432,7 @@ class FitDreamAnalyzer:
     
     def _detect_pauses(self):
         """Detecta pausas con distancia y duración"""
-        if self.df_events is None or self.df_records is None:
+        if self.df_events is None:
             return
         
         timer_events = self.df_events[
@@ -399,15 +454,20 @@ class FitDreamAnalyzer:
                 start_time = timer_events.iloc[i + 1]['timestamp']
                 duration = (start_time - stop_time).total_seconds()
                 
-                # Encontrar distancia al momento de la pausa
-                pause_record = self.df_records[self.df_records['timestamp'] <= stop_time]
-                if not pause_record.empty and 'distance' in pause_record.columns:
-                    distance_km = pause_record['distance'].iloc[-1] / 1000
-                    pauses.append({
-                        'distance_km': distance_km,
-                        'duration_seconds': duration,
-                        'duration_formatted': str(timedelta(seconds=int(duration)))
-                    })
+                pause_data = {
+                    'duration_seconds': duration,
+                    'duration_formatted': str(timedelta(seconds=int(duration)))
+                }
+                
+                # Solo agregar distancia si no es treadmill
+                if not self.is_treadmill and self.df_records is not None:
+                    # Encontrar distancia al momento de la pausa
+                    pause_record = self.df_records[self.df_records['timestamp'] <= stop_time]
+                    if not pause_record.empty and 'distance' in pause_record.columns:
+                        distance_km = pause_record['distance'].iloc[-1] / 1000
+                        pause_data['distance_km'] = distance_km
+                
+                pauses.append(pause_data)
         
         self.pauses = pauses
     
@@ -435,7 +495,7 @@ class FitDreamAnalyzer:
         self.key_devices = unique_devices
     
     def generate_report(self):
-        """Genera el Dream Report profesional"""
+        """Genera el Dream Report unificado"""
         self._print_header()
         self._print_executive_summary()
         self._print_running_dynamics_summary()
@@ -447,7 +507,10 @@ class FitDreamAnalyzer:
     def _print_header(self):
         """Header del reporte"""
         print("\n" + "="*80)
-        print("🏃 DREAM REPORT - ANÁLISIS DE RENDIMIENTO")
+        if self.is_treadmill:
+            print("🏃 DREAM REPORT - ANÁLISIS TREADMILL")
+        else:
+            print("🏃 DREAM REPORT - ANÁLISIS DE RENDIMIENTO")
         print("="*80)
         
         if self.session_start_local:
@@ -457,9 +520,11 @@ class FitDreamAnalyzer:
                 date_str = self.session_start_local.strftime('%d/%m/%Y %H:%M (hora local)')
             print(f"📅 Sesión: {date_str}")
         
-        # Mostrar ubicación si está disponible
-        if self.location_info:
+        # Mostrar ubicación si está disponible (solo outdoor)
+        if self.location_info and not self.is_treadmill:
             print(f"📍 Ubicación: {self.location_info}")
+        elif self.is_treadmill:
+            print("🏃 Modalidad: Treadmill")
     
     def _print_executive_summary(self):
         """1. Resumen Ejecutivo"""
@@ -474,19 +539,23 @@ class FitDreamAnalyzer:
                 duration = str(timedelta(seconds=int(session['total_elapsed_time'])))
                 print(f"⏱️  Duración: {duration}")
             
-            if 'total_distance' in session:
-                distance = session['total_distance'] / 1000
-                print(f"📏 Distancia: {distance:.2f} km")
+            # DISTANCIA - Para treadmill mostrar ambas si difieren
+            if self.is_treadmill:
+                self._print_distance_analysis(session)
+            else:
+                if 'total_distance' in session:
+                    distance = session['total_distance'] / 1000
+                    print(f"📏 Distancia: {distance:.2f} km")
             
-            # Pace promedio de la sesión
-            if 'total_timer_time' in session and 'total_distance' in session:
+            # Pace promedio de la sesión - usar distancia apropiada
+            distance_for_pace = self._get_distance_for_calculations(session)
+            if 'total_timer_time' in session and distance_for_pace > 0:
                 timer_time_minutes = session['total_timer_time'] / 60
-                distance_km = session['total_distance'] / 1000
-                if distance_km > 0:
-                    avg_pace = timer_time_minutes / distance_km
-                    pace_min = int(avg_pace)
-                    pace_sec = int((avg_pace % 1) * 60)
-                    print(f"🏃‍♂️ Pace Promedio: {pace_min}:{pace_sec:02d}/km")
+                distance_km = distance_for_pace / 1000
+                avg_pace = timer_time_minutes / distance_km
+                pace_min = int(avg_pace)
+                pace_sec = int((avg_pace % 1) * 60)
+                print(f"🏃‍♂️ Pace Promedio: {pace_min}:{pace_sec:02d}/km")
             
             # Heart Rate de la sesión
             if 'avg_heart_rate' in session and 'max_heart_rate' in session:
@@ -503,7 +572,7 @@ class FitDreamAnalyzer:
             if 'normalized_power' in session:
                 print(f"💪 Potencia Normalizada: {session['normalized_power']} W")
             
-            # Calorías - intentar distinguir entre activas y totales
+            # Calorías
             calories_info = self._get_calories_info(session)
             if calories_info:
                 print(calories_info)
@@ -512,14 +581,53 @@ class FitDreamAnalyzer:
             if 'training_stress_score' in session:
                 print(f"📊 TSS: {session['training_stress_score']}")
         
-        # Elevación
-        if self.df_laps is not None and 'total_ascent' in self.df_laps.columns:
+        # Elevación (solo para outdoor)
+        if not self.is_treadmill and self.df_laps is not None and 'total_ascent' in self.df_laps.columns:
             ascent = self.df_laps['total_ascent'].sum()
             descent = self.df_laps.get('total_descent', pd.Series([0])).sum()
             print(f"⛰️  Elevación: +{ascent}m / -{descent}m")
         
         print(f"🔄 Vueltas válidas: {len(self.laps)}")
         print(f"⏸️  Pausas: {len(self.pauses)}")
+    
+    def _print_distance_analysis(self, session):
+        """Analiza y muestra las diferentes medidas de distancia (para treadmill)"""
+        # Buscar diferentes campos de distancia
+        total_distance = session.get('total_distance')  # Calculado por Garmin
+        
+        # Buscar en laps si hay calibración manual
+        calibrated_distance = None
+        if self.df_laps is not None and 'total_distance' in self.df_laps.columns:
+            # La distancia calibrada podría estar en los laps
+            lap_total_distance = self.df_laps['total_distance'].sum()
+            if abs(lap_total_distance - total_distance) > 50:  # Diferencia significativa (>50m)
+                calibrated_distance = lap_total_distance
+        
+        # Mostrar distancias
+        if total_distance:
+            garmin_distance = total_distance / 1000
+            
+            if calibrated_distance and abs(calibrated_distance - total_distance) > 50:
+                # Hay diferencia significativa - mostrar ambas
+                calibrated_km = calibrated_distance / 1000
+                
+                print(f"📏 Distancia Garmin: {garmin_distance:.3f} km")
+                print(f"📐 Distancia Treadmill: {calibrated_km:.3f} km")
+            else:
+                # Solo una distancia o diferencia mínima
+                print(f"📏 Distancia: {garmin_distance:.2f} km")
+    
+    def _get_distance_for_calculations(self, session):
+        """Determina qué distancia usar para cálculos (prioriza calibrada para treadmill)"""
+        total_distance = session.get('total_distance', 0)
+        
+        # Para treadmill: buscar distancia calibrada en laps
+        if self.is_treadmill and self.df_laps is not None and 'total_distance' in self.df_laps.columns:
+            lap_total_distance = self.df_laps['total_distance'].sum()
+            if abs(lap_total_distance - total_distance) > 50:  # Hay calibración
+                return lap_total_distance
+        
+        return total_distance
     
     def _get_calories_info(self, session):
         """Determina qué tipo de calorías están disponibles y las formatea correctamente"""
@@ -579,15 +687,23 @@ class FitDreamAnalyzer:
     
     def _print_detailed_lap_analysis(self):
         """3. Análisis Detallado por Lap con métricas acumuladas"""
-        print(f"\n🏁 ANÁLISIS DETALLADO POR LAP")
-        print("-" * 100)
+        if self.is_treadmill:
+            print(f"\n🏁 ANÁLISIS DETALLADO POR LAP - LAPS CALCULADAS POR GARMIN, NO TREADMILL")
+            print("-" * 90)
+        else:
+            print(f"\n🏁 ANÁLISIS DETALLADO POR LAP")
+            print("-" * 100)
         
         if self.df_laps is None or len(self.df_laps) == 0:
             print("No hay datos de laps disponibles")
             return
         
-        # Header de la tabla (expandido)
-        header = "Lap | Pace    | Dist  | Cum Time | Cum Dist | HR Avg/Max | Power Avg/Max | Cadence Avg/Max | Step Length | GCT Imb | Elev +/-"
+        # Header de la tabla (con o sin elevación según modalidad)
+        if self.is_treadmill:
+            header = "Lap | Pace    | Dist  | Cum Time | Cum Dist | HR Avg/Max | Power Avg/Max | Cadence Avg/Max | Step Length"
+        else:
+            header = "Lap | Pace    | Dist  | Cum Time | Cum Dist | HR Avg/Max | Power Avg/Max | Cadence Avg/Max | Step Length | GCT Imb | Elev +/-"
+        
         print(header)
         print("-" * len(header))
         
@@ -631,26 +747,32 @@ class FitDreamAnalyzer:
             step_length = lap.get('avg_step_length_m', 0)
             step_str = f"{step_length:.2f}m" if step_length > 0 else 'N/A'
             
-            # GCT Imbalance
-            gct_imb = lap.get('gct_imbalance_ms')
-            gct_str = f"{gct_imb:.1f}ms" if pd.notna(gct_imb) else 'N/A'
+            # Formatear fila base
+            row = f"{i:2d}  | {pace_str:7s} | {dist_str:5s} | {cum_time_str:8s} | {cum_dist_str:8s} | {hr_str:11s} | {power_str:13s} | {cadence_str:15s} | {step_str:11s}"
             
-            # Elevación
-            ascent = int(lap.get('total_ascent', 0))
-            descent = int(lap.get('total_descent', 0))
-            elev_str = f"+{ascent}/-{descent}"
+            # Solo agregar GCT y elevación para outdoor
+            if not self.is_treadmill:
+                # GCT Imbalance
+                gct_imb = lap.get('gct_imbalance_ms')
+                gct_str = f"{gct_imb:.1f}ms" if pd.notna(gct_imb) else 'N/A'
+                
+                # Elevación
+                ascent = int(lap.get('total_ascent', 0))
+                descent = int(lap.get('total_descent', 0))
+                elev_str = f"+{ascent}/-{descent}"
+                
+                row += f" | {gct_str:7s} | {elev_str}"
             
-            # Formatear fila
-            row = f"{i:2d}  | {pace_str:7s} | {dist_str:5s} | {cum_time_str:8s} | {cum_dist_str:8s} | {hr_str:11s} | {power_str:13s} | {cadence_str:15s} | {step_str:11s} | {gct_str:7s} | {elev_str}"
             print(row)
         
-        # Top 3 mejores laps por pace (más rápidos) con métricas acumuladas
+        # Top 3 mejores laps por pace (más rápidos)
         if 'pace_calculated' in self.df_laps.columns:
             valid_laps = self.df_laps.dropna(subset=['pace_calculated'])
             if len(valid_laps) > 0:
-                best_laps = valid_laps.nsmallest(3, 'pace_calculated')
+                num_best = min(3, len(valid_laps))
+                best_laps = valid_laps.nsmallest(num_best, 'pace_calculated')
                 
-                print(f"\n🥇 TOP 3 LAPS MÁS RÁPIDOS:")
+                print(f"\n🥇 TOP {num_best} LAPS MÁS RÁPIDOS:")
                 for idx, (lap_idx, lap) in enumerate(best_laps.iterrows(), 1):
                     pace_min = int(lap['pace_calculated'])
                     pace_sec = int((lap['pace_calculated'] % 1) * 60)
@@ -666,13 +788,16 @@ class FitDreamAnalyzer:
                     lap_distance = lap.get('total_distance', 0) / 1000
                     lap_distance_str = f"{lap_distance:.1f}km"
                     
-                    # Delta de altitud del lap individual
-                    ascent = int(lap.get('total_ascent', 0))
-                    descent = int(lap.get('total_descent', 0))
-                    altitude_delta = ascent - descent
-                    delta_str = f"{altitude_delta:+d}m" if altitude_delta != 0 else "±0m"
-                    
-                    print(f"   {idx}. Lap {lap_idx + 1}: {pace_str}/km | {hr} bpm | {power} W | {lap_duration_str} | {lap_distance_str} | {delta_str}")
+                    if self.is_treadmill:
+                        print(f"   {idx}. Lap {lap_idx + 1}: {pace_str}/km | {hr} bpm | {power} W | {lap_duration_str} | {lap_distance_str}")
+                    else:
+                        # Delta de altitud del lap individual
+                        ascent = int(lap.get('total_ascent', 0))
+                        descent = int(lap.get('total_descent', 0))
+                        altitude_delta = ascent - descent
+                        delta_str = f"{altitude_delta:+d}m" if altitude_delta != 0 else "±0m"
+                        
+                        print(f"   {idx}. Lap {lap_idx + 1}: {pace_str}/km | {hr} bpm | {power} W | {lap_duration_str} | {lap_distance_str} | {delta_str}")
     
     def _print_pauses_analysis(self):
         """4. Análisis de Pausas"""
@@ -686,7 +811,6 @@ class FitDreamAnalyzer:
         print(f"📊 Total de pausas: {len(self.pauses)}")
         
         for i, pause in enumerate(self.pauses, 1):
-            distance = pause['distance_km']
             duration = pause['duration_formatted']
             
             # Clasificar tipo de pausa por duración
@@ -698,7 +822,12 @@ class FitDreamAnalyzer:
             else:
                 pause_type = "Pausa larga"
             
-            print(f"   {i}. Km {distance:.1f} → {duration} ({pause_type})")
+            # Mostrar con o sin distancia según modalidad
+            if self.is_treadmill or 'distance_km' not in pause:
+                print(f"   {i}. {duration} ({pause_type})")
+            else:
+                distance = pause['distance_km']
+                print(f"   {i}. Km {distance:.1f} → {duration} ({pause_type})")
         
         # Tiempo total en pausa
         total_pause_time = sum(p['duration_seconds'] for p in self.pauses)
@@ -711,8 +840,14 @@ class FitDreamAnalyzer:
         print(f"\n📱 EQUIPAMIENTO")
         print("-" * 40)
         
+        if self.is_treadmill:
+            print("🏃 Modalidad: Treadmill (interior)")
+        
         if not self.key_devices:
-            print("Sin información de sensores externos")
+            if self.is_treadmill:
+                print("📱 Solo reloj GPS detectado")
+            else:
+                print("Sin información de sensores externos")
             return
         
         device_types = {
@@ -746,7 +881,10 @@ class FitDreamAnalyzer:
     def _print_footer(self):
         """Footer del reporte"""
         print(f"\n" + "="*80)
-        print("📈 Reporte generado por Dream FIT Analyzer")
+        if self.is_treadmill:
+            print("📈 Reporte generado por Dream FIT Analyzer - Treadmill")
+        else:
+            print("📈 Reporte generado por Dream FIT Analyzer")
         print("="*80)
     
     def export_data(self, output_dir="output"):
@@ -755,6 +893,7 @@ class FitDreamAnalyzer:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         exported_files = []
+        activity_prefix = "treadmill" if self.is_treadmill else "outdoor"
         
         # 1. Análisis completo por lap con métricas acumuladas
         if self.df_laps is not None:
@@ -766,17 +905,20 @@ class FitDreamAnalyzer:
                 'avg_running_cadence_corrected', 'max_running_cadence_corrected',
                 'avg_step_length_m', 'gct_imbalance_ms',
                 'avg_vertical_oscillation', 'avg_stance_time', 'avg_stance_time_balance',
-                'total_ascent', 'total_descent',
                 'avg_temperature', 'total_calories'
             ]
+            
+            # Para outdoor agregar elevación
+            if not self.is_treadmill:
+                lap_analysis_cols.extend(['total_ascent', 'total_descent'])
             
             available_cols = [col for col in lap_analysis_cols if col in self.df_laps.columns]
             lap_analysis = self.df_laps[available_cols].copy()
             lap_analysis.index += 1  # Laps empiezan en 1
             
-            filename = f"detailed_lap_analysis_{timestamp}.csv"
+            filename = f"{activity_prefix}_detailed_lap_analysis_{timestamp}.csv"
             lap_analysis.to_csv(f"{output_dir}/{filename}")
-            exported_files.append(f"{filename} - {len(lap_analysis)} laps con análisis completo")
+            exported_files.append(f"{filename} - {len(lap_analysis)} laps {activity_prefix}")
         
         # 2. Records limpios con métricas corregidas
         if self.df_records is not None:
@@ -792,22 +934,22 @@ class FitDreamAnalyzer:
             available_cols = [col for col in record_cols if col in self.df_records.columns]
             clean_records = self.df_records[available_cols]
             
-            filename = f"records_with_corrections_{timestamp}.csv"
+            filename = f"{activity_prefix}_records_with_corrections_{timestamp}.csv"
             clean_records.to_csv(f"{output_dir}/{filename}", index=False)
-            exported_files.append(f"{filename} - {len(clean_records)} registros corregidos")
+            exported_files.append(f"{filename} - {len(clean_records)} registros {activity_prefix}")
         
         # 3. Resumen de pausas
         if self.pauses:
             pauses_df = pd.DataFrame(self.pauses)
-            filename = f"pauses_summary_{timestamp}.csv"
+            filename = f"{activity_prefix}_pauses_summary_{timestamp}.csv"
             pauses_df.to_csv(f"{output_dir}/{filename}", index=False)
             exported_files.append(f"{filename} - {len(self.pauses)} pausas")
         
         # 4. Tabla de laps en formato visual mejorado
         if self.df_laps is not None:
-            filename = f"lap_analysis_table_{timestamp}.txt"
+            filename = f"{activity_prefix}_lap_analysis_table_{timestamp}.txt"
             self._export_visual_lap_table(f"{output_dir}/{filename}")
-            exported_files.append(f"{filename} - Tabla visual de laps")
+            exported_files.append(f"{filename} - Tabla visual de laps {activity_prefix}")
         
         if exported_files:
             print(f"\n💾 ARCHIVOS EXPORTADOS:")
@@ -818,8 +960,13 @@ class FitDreamAnalyzer:
     def _export_visual_lap_table(self, filename):
         """Exporta tabla de laps en formato visual mejorado con métricas acumuladas"""
         with open(filename, 'w', encoding='utf-8') as f:
-            f.write("🏁 ANÁLISIS DETALLADO POR LAP\n")
-            f.write("=" * 100 + "\n")
+            if self.is_treadmill:
+                f.write("🏁 ANÁLISIS DETALLADO POR LAP - TREADMILL\n")
+                f.write("=" * 90 + "\n")
+            else:
+                f.write("🏁 ANÁLISIS DETALLADO POR LAP\n")
+                f.write("=" * 100 + "\n")
+            
             f.write(f"Actividad: {os.path.basename(self.fit_file_path)}\n")
             
             if self.session_start_local:
@@ -829,13 +976,19 @@ class FitDreamAnalyzer:
                     date_str = self.session_start_local.strftime('%d/%m/%Y %H:%M (hora local)')
                 f.write(f"Fecha: {date_str}\n")
             
-            if self.location_info:
+            if self.location_info and not self.is_treadmill:
                 f.write(f"Ubicación: {self.location_info}\n")
+            elif self.is_treadmill:
+                f.write("Modalidad: Treadmill\n")
                 
             f.write("\n")
             
-            # Header de la tabla (expandido)
-            header = "Lap | Pace    | Dist  | Cum Time | Cum Dist | HR Avg/Max | Power Avg/Max | Cadence Avg/Max | Step Length | GCT Imb | Elev +/-"
+            # Header de la tabla (con o sin elevación)
+            if self.is_treadmill:
+                header = "Lap | Pace    | Dist  | Cum Time | Cum Dist | HR Avg/Max | Power Avg/Max | Cadence Avg/Max | Step Length"
+            else:
+                header = "Lap | Pace    | Dist  | Cum Time | Cum Dist | HR Avg/Max | Power Avg/Max | Cadence Avg/Max | Step Length | GCT Imb | Elev +/-"
+            
             f.write(header + "\n")
             f.write("-" * len(header) + "\n")
             
@@ -879,26 +1032,32 @@ class FitDreamAnalyzer:
                 step_length = lap.get('avg_step_length_m', 0)
                 step_str = f"{step_length:.2f}m" if step_length > 0 else 'N/A'
                 
-                # GCT Imbalance
-                gct_imb = lap.get('gct_imbalance_ms')
-                gct_str = f"{gct_imb:.1f}ms" if pd.notna(gct_imb) else 'N/A'
+                # Formatear fila base
+                row = f"{i:2d}  | {pace_str:7s} | {dist_str:5s} | {cum_time_str:8s} | {cum_dist_str:8s} | {hr_str:11s} | {power_str:13s} | {cadence_str:15s} | {step_str:11s}"
                 
-                # Elevación
-                ascent = int(lap.get('total_ascent', 0))
-                descent = int(lap.get('total_descent', 0))
-                elev_str = f"+{ascent}/-{descent}"
+                # Solo agregar GCT y elevación para outdoor
+                if not self.is_treadmill:
+                    # GCT Imbalance
+                    gct_imb = lap.get('gct_imbalance_ms')
+                    gct_str = f"{gct_imb:.1f}ms" if pd.notna(gct_imb) else 'N/A'
+                    
+                    # Elevación
+                    ascent = int(lap.get('total_ascent', 0))
+                    descent = int(lap.get('total_descent', 0))
+                    elev_str = f"+{ascent}/-{descent}"
+                    
+                    row += f" | {gct_str:7s} | {elev_str}"
                 
-                # Formatear fila
-                row = f"{i:2d}  | {pace_str:7s} | {dist_str:5s} | {cum_time_str:8s} | {cum_dist_str:8s} | {hr_str:11s} | {power_str:13s} | {cadence_str:15s} | {step_str:11s} | {gct_str:7s} | {elev_str}"
                 f.write(row + "\n")
             
-            # Top 3 mejores laps con métricas acumuladas
+            # Top mejores laps
             if 'pace_calculated' in self.df_laps.columns:
                 valid_laps = self.df_laps.dropna(subset=['pace_calculated'])
                 if len(valid_laps) > 0:
-                    best_laps = valid_laps.nsmallest(3, 'pace_calculated')
+                    num_best = min(3, len(valid_laps))
+                    best_laps = valid_laps.nsmallest(num_best, 'pace_calculated')
                     
-                    f.write(f"\n🥇 TOP 3 LAPS MÁS RÁPIDOS:\n")
+                    f.write(f"\n🥇 TOP {num_best} LAPS MÁS RÁPIDOS:\n")
                     for idx, (lap_idx, lap) in enumerate(best_laps.iterrows(), 1):
                         pace_min = int(lap['pace_calculated'])
                         pace_sec = int((lap['pace_calculated'] % 1) * 60)
@@ -914,23 +1073,30 @@ class FitDreamAnalyzer:
                         lap_distance = lap.get('total_distance', 0) / 1000
                         lap_distance_str = f"{lap_distance:.1f}km"
                         
-                        # Delta de altitud del lap individual
-                        ascent = int(lap.get('total_ascent', 0))
-                        descent = int(lap.get('total_descent', 0))
-                        altitude_delta = ascent - descent
-                        delta_str = f"{altitude_delta:+d}m" if altitude_delta != 0 else "±0m"
-                        
-                        f.write(f"   {idx}. Lap {lap_idx + 1}: {pace_str}/km | {hr} bpm | {power} W | {lap_duration_str} | {lap_distance_str} | {delta_str}\n")
+                        if self.is_treadmill:
+                            f.write(f"   {idx}. Lap {lap_idx + 1}: {pace_str}/km | {hr} bpm | {power} W | {lap_duration_str} | {lap_distance_str}\n")
+                        else:
+                            # Delta de altitud del lap individual
+                            ascent = int(lap.get('total_ascent', 0))
+                            descent = int(lap.get('total_descent', 0))
+                            altitude_delta = ascent - descent
+                            delta_str = f"{altitude_delta:+d}m" if altitude_delta != 0 else "±0m"
+                            
+                            f.write(f"   {idx}. Lap {lap_idx + 1}: {pace_str}/km | {hr} bpm | {power} W | {lap_duration_str} | {lap_distance_str} | {delta_str}\n")
             
-            f.write(f"\n" + "=" * 100 + "\n")
+            separator_length = 90 if self.is_treadmill else 100
+            f.write(f"\n" + "=" * separator_length + "\n")
             f.write("📋 Este archivo se puede copiar/pegar en Excel o Google Sheets\n")
             f.write("📊 Los datos también están disponibles en CSV para análisis avanzado\n")
             f.write("⏱️  Cum Time = Tiempo acumulado hasta ese lap\n")
             f.write("📏 Cum Dist = Distancia acumulada hasta ese lap\n")
+            if self.is_treadmill:
+                f.write("🏃 Modalidad: Treadmill (sin datos GPS de elevación)\n")
+
 
 def main():
     if len(sys.argv) != 2:
-        print("Uso: python dream_report.py archivo.fit")
+        print("Uso: python fit-report.py archivo.fit")
         sys.exit(1)
     
     fit_file = sys.argv[1]
@@ -939,8 +1105,8 @@ def main():
         print(f"❌ Archivo no encontrado: {fit_file}")
         sys.exit(1)
     
-    # Crear y ejecutar análisis
-    analyzer = FitDreamAnalyzer(fit_file)
+    # Crear y ejecutar análisis unificado
+    analyzer = FitUnifiedAnalyzer(fit_file)
     
     if not analyzer.load_fit_file():
         sys.exit(1)
@@ -950,7 +1116,7 @@ def main():
     analyzer.export_data()
     
     if not REVERSE_GEOCODER_AVAILABLE:
-        print("\n💡 TIP: Instala 'reverse_geocoder' para detección de ubicación:")
+        print("\n💡 TIP: Instala 'reverse_geocoder' para detección de ubicación en outdoor:")
         print("   pip install reverse_geocoder")
 
 if __name__ == "__main__":
