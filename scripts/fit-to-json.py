@@ -43,8 +43,14 @@ ALIAS_MAP_SESSION = {
     "unknown_207": ("body_battery_or_stamina_end_pct", "%", 1.0),
 }
 
+# ===== Device name mappings (by serial number) =====
+DEVICE_SERIAL_NAME_MAP = {
+    "3475286115": "Forerunner 955",
+    "3468245700": "HRM-Pro Plus"
+}
+
 # ===== Internal device filter (configurable) =====
-INTERNAL_PRODUCT_CODE_SET = {4025}
+INTERNAL_PRODUCT_CODE_SET = {4025, 3865}  # Added 3865 to filter
 INTERNAL_NAME_PATTERNS = {
     "gnss", "gps", "sensor hub", "ssd", "barometer", "accelerometer",
     "compass", "gyroscope", "ambient", "environment", "ohr", "elevate"
@@ -478,6 +484,10 @@ def build_json_for_fit(fit_path, include_records=True, geo="deg",
             gp = d.get("garmin_product")
             if isinstance(gp, int) and gp in INTERNAL_PRODUCT_CODE_SET:
                 return True
+            # Also check product field for string representation
+            prod_str = str(d.get("product", "")).strip()
+            if prod_str == "3865":
+                return True
         except Exception:
             pass
         # scan name/product/type for internal patterns
@@ -491,9 +501,16 @@ def build_json_for_fit(fit_path, include_records=True, geo="deg",
     for d in device_info_clean:
         if _is_internal(d):
             continue
+        serial_num = str(d.get("serial_number", "")).strip()
+        device_name = None
+        
+        # Check if we have a custom name mapping for this serial
+        if serial_num in DEVICE_SERIAL_NAME_MAP:
+            device_name = DEVICE_SERIAL_NAME_MAP[serial_num]
+        
         item = {
             "manufacturer": d.get("manufacturer"),
-            "product": _canon_product_name(d),
+            "product": device_name or _canon_product_name(d),
             "serial": d.get("serial_number"),
             "type": d.get("antplus_device_type", d.get("device_type")),
             "battery_status": d.get("battery_status"),
