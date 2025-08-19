@@ -645,7 +645,11 @@ def main():
         sys.stderr.write(f"[WARN] Input no parece .fit: {fit_path}\n")
 
     base = os.path.splitext(os.path.basename(fit_path))[0]
-    outdir = os.path.join(os.path.dirname(os.path.abspath(fit_path)), base)
+    # Save to training/json directory instead of next to the FIT file
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    training_dir = os.path.dirname(script_dir)  # Go up one level from scripts to training
+    json_dir = os.path.join(training_dir, "json")
+    outdir = os.path.join(json_dir, base)
     os.makedirs(outdir, exist_ok=True)
 
     payload_full = build_json_for_fit(

@@ -123,14 +123,17 @@ def build_page_props(run_json, shoes=None, run_category=None, rpe=None,
             if label:
                 devices.append(label)
 
-    # Convert RPE from device encoding to "X/10" format
+    # Convert RPE to "X/10" format
     raw_rpe = rpe if rpe is not None else summary.get("workout_rpe")
     rpe_display = None
     if raw_rpe is not None:
-        # Device appears to encode RPE where 20 = 2nd lowest effort (2/10)
-        # Convert by dividing by 10 to get proper 1-10 scale, then format as "X/10"
-        converted_value = int(raw_rpe / 10.0)
-        rpe_display = f"{converted_value}/10"
+        if rpe is not None:
+            # User provided RPE via command line - use as-is but add /10 format
+            rpe_display = f"{int(rpe)}/10"
+        else:
+            # RPE from device - convert from device encoding (20 = 2/10)
+            converted_value = int(raw_rpe / 10.0)
+            rpe_display = f"{converted_value}/10"
 
     props = {
         # Metadata
